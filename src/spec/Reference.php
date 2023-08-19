@@ -329,8 +329,6 @@ class Reference implements SpecObjectInterface, DocumentContextInterface
         return $transitiveRefResult;
     }
 
-    private $_recursingInsideFile = false;
-
     /**
      * Adjust relative references inside the file to match the context of the base file
      *
