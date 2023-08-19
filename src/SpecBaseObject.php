@@ -25,6 +25,7 @@ abstract class SpecBaseObject implements SpecObjectInterface, DocumentContextInt
     private $_properties = [];
     private $_errors = [];
 
+    private $_hasBeenResolved = false;
     private $_recursingSerializableData = false;
     private $_recursingValidate = false;
     private $_recursingErrors = false;
@@ -34,7 +35,6 @@ abstract class SpecBaseObject implements SpecObjectInterface, DocumentContextInt
 
     private $_baseDocument;
     private $_jsonPointer;
-
 
     /**
      * @return array array of attributes available in this object.
@@ -393,6 +393,10 @@ abstract class SpecBaseObject implements SpecObjectInterface, DocumentContextInt
      */
     public function resolveReferences(ReferenceContext $context = null)
     {
+        if ($this->_hasBeenResolved === true) {
+            return;
+        }
+
         // avoid recursion to get stuck in a loop
         if ($this->_recursingReferences) {
             return;
@@ -423,6 +427,7 @@ abstract class SpecBaseObject implements SpecObjectInterface, DocumentContextInt
             }
         }
 
+        $this->_hasBeenResolved = true;
         $this->_recursingReferences = false;
     }
 
