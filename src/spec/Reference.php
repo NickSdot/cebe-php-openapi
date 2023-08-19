@@ -58,6 +58,8 @@ class Reference implements SpecObjectInterface, DocumentContextInterface
      */
     private $_errors = [];
 
+    private $_recursingInsideFile = false;
+
     /**
      * Create an object from spec data.
      * @param array $data spec data read from YAML or JSON
@@ -330,50 +332,83 @@ class Reference implements SpecObjectInterface, DocumentContextInterface
     private $_recursingInsideFile = false;
 
     /**
-     * Adjust relative references inside of the file to match the context of the base file
-     */
-    private function adjustRelativeReferences($referencedDocument, $basePath, $baseDocument = null, $oContext = null)
+     * Adjust relative references inside the file to match the context of the base file
+     *
+     * @noinspection PhpConditionAlreadyCheckedInspection*/
+    private function adjustRelativeReferences($referencedDocument, $basePath, $baseDocument = null, ?ReferenceContext $oContext = null)
     {
+
         $context = new ReferenceContext(null, $basePath);
+
         if ($baseDocument === null) {
             $baseDocument = $referencedDocument;
         }
 
         foreach ($referencedDocument as $key => $value) {
-            // adjust reference URLs
-            if ($key === '$ref' && is_string($value)) {
-                if (isset($value[0]) && $value[0] === '#') {
-                    // direcly inline references in the same document,
-                    // these are not going to be valid in the new context anymore
-                    $inlineDocument = (new JsonPointer(substr($value, 1)))->evaluate($baseDocument);
-                    if ($this->_recursingInsideFile) {
-                        // keep reference when it is a recursive reference
-                        return ['$ref' => $basePath . $value];
-                    }
-                    $this->_recursingInsideFile = true;
-                    $return = $this->adjustRelativeReferences($inlineDocument, $basePath, $baseDocument, $oContext);
-                    $this->_recursingInsideFile = false;
-                    return $return;
-                }
-                $referencedDocument[$key] = $context->resolveRelativeUri($value);
-                $parts = explode('#', $referencedDocument[$key], 2);
-                if ($parts[0] === $oContext->getUri()) {
-                    $referencedDocument[$key] = '#' . ($parts[1] ?? '');
-                } else {
-                    $referencedDocument[$key] = $this->makeRelativePath($oContext->getUri(), $referencedDocument[$key]);
-                }
-                continue;
-            }
-            // adjust URLs for 'externalValue' references in Example Objects
-            // https://spec.openapis.org/oas/v3.0.3#example-object
-            if ($key === 'externalValue' && is_string($value)) {
-                $referencedDocument[$key] = $this->makeRelativePath($oContext->getUri(), $context->resolveRelativeUri($value));
-                continue;
-            }
-            if (is_array($value)) {
+
+            if (is_array($value) === true) {
                 $referencedDocument[$key] = $this->adjustRelativeReferences($value, $basePath, $baseDocument, $oContext);
+                continue;
             }
+
+            // non strings can't be references
+            if (is_string($value) === false) {
+                continue;
+            }
+
+            // $this->_to does not apply here
+            $fullPath = $basePath . $value;
+            $cachePointer = $fullPath;
+            $cacheType = 'relativeReference';
+
+            if ($context->getCache()->has($cachePointer, $cacheType)) {
+                return $context->getCache()->get($cachePointer, $cacheType);
+            }
+
+            // directly inline references in the same document,
+            // these are not going to be valid in the new context anymore
+            if ($key === '$ref' && str_starts_with($value, '#')) {
+
+                $inlineDocument = (new JsonPointer(substr($value, 1)))->evaluate($baseDocument);
+
+                // keep reference when it is a recursive reference
+                if ($this->_recursingInsideFile) {
+                    return ['$ref' => $fullPath];
+                }
+
+                $this->_recursingInsideFile = true;
+                $return = $this->adjustRelativeReferences($inlineDocument, $basePath, $baseDocument, $oContext);
+                $this->_recursingInsideFile = false;
+
+                $context->getCache()->set($cachePointer, $cacheType, $return);
+
+                return $return;
+            }
+
+            $oContextUri = $oContext->getUri();
+            $resolvedUri = $context->resolveRelativeUri($value);
+
+            // adjust reference URLs
+            if ($key === '$ref') {
+
+                if (str_starts_with($resolvedUri, $oContextUri)) {
+                    $fragment = str_replace($oContextUri, '', $resolvedUri);
+                    $referencedDocument[$key] = $fragment ?: '#';
+                } else {
+                    $referencedDocument[$key] = $this->makeRelativePath($oContextUri, $resolvedUri);
+                }
+            }
+
+            // adjust externalValue fields  https://spec.openapis.org/oas/v3.0.3#example-object
+            if ($key === 'externalValue') {
+                $referencedDocument[$key] = $this->makeRelativePath($oContextUri, $resolvedUri);
+            }
+
+            $oContext->getCache()->set($cachePointer, $cacheType, $referencedDocument);
+
         }
+
+
         return $referencedDocument;
     }
 
