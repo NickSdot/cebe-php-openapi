@@ -172,48 +172,83 @@ class Reference implements SpecObjectInterface, DocumentContextInterface
      */
     public function resolve(ReferenceContext $context = null)
     {
+        $context ??= $this->getContext();
+
         if ($context === null) {
-            $context = $this->getContext();
-            if ($context === null) {
-                throw new UnresolvableReferenceException('No context given for resolving reference.');
-            }
+            throw new UnresolvableReferenceException('No context given for resolving reference.');
         }
+
         $jsonReference = $this->_jsonReference;
+
         if ($jsonReference === null) {
             if ($context->throwException) {
                 throw new UnresolvableReferenceException(implode("\n", $this->getErrors()));
             }
             return $this;
         }
+
+        // If the reference is an inline reference, but the current mode
+        // only resolves external references, we can return early.
+
+        if ($jsonReference->getDocumentUri() === '' && $context->mode === ReferenceContext::RESOLVE_MODE_INLINE) {
+            return $this;
+        }
+
+        $baseSpec = $context->getBaseSpec();
+
+        // Cache type is for all following cases the same.
+        // The cache pointer might be overridden depending
+        // on the specific  case.
+
+        $cacheType = $this->_to;
+        $cachePointer = $this->_ref;
+
         try {
-            if ($jsonReference->getDocumentUri() === '') {
-                if ($context->mode === ReferenceContext::RESOLVE_MODE_INLINE) {
-                    return $this;
+
+            /**
+             * References in the same document
+             */
+
+            if ($jsonReference->getDocumentUri() === '' && $baseSpec !== null) {
+
+                if($context->getCache()->has($cachePointer, $cacheType)) {
+                    return $context->getCache()->get($cachePointer, $cacheType);
                 }
 
-                // resolve in current document
-                $baseSpec = $context->getBaseSpec();
-                if ($baseSpec !== null) {
-                    // TODO type error if resolved object does not match $this->_to ?
-                    /** @var SpecObjectInterface $referencedObject */
-                    $referencedObject = $jsonReference->getJsonPointer()->evaluate($baseSpec);
-                    // transitive reference
-                    if ($referencedObject instanceof Reference) {
-                        $referencedObject = $this->resolveTransitiveReference($referencedObject, $context);
-                    }
-                    if ($referencedObject instanceof SpecObjectInterface) {
-                        $referencedObject->setReferenceContext($context);
-                    }
-                    return $referencedObject;
-                } else {
-                    // if current document was loaded via reference, it may be null,
-                    // so we load current document by URI instead.
-                    $jsonReference = JsonReference::createFromUri($context->getUri(), $jsonReference->getJsonPointer());
+                /** @var SpecObjectInterface $referencedObject */
+                $referencedObject = $jsonReference->getJsonPointer()->evaluate($baseSpec); // TODO type error if resolved object does not match $this->_to ?
+
+                // transitive reference
+                if ($referencedObject instanceof Reference) {
+                    $referencedObject = $this->resolveTransitiveReference($referencedObject, $context);
                 }
+
+                if ($referencedObject instanceof SpecObjectInterface) {
+                    $referencedObject->setReferenceContext($context);
+                }
+
+                $context->getCache()->set($cachePointer, $cacheType, $referencedObject);
+
+                return $referencedObject;
+
             }
 
-            // resolve in external document
+            /**
+             * References in external documents
+             */
+
+            // multiple files can have the same reference,
+            // so we make the cache pointer more specific.
+            $cachePointer = $context->resolveRelativeUri(
+                $jsonReference->getReference()
+            );
+
+            if($context->getCache()->has($cachePointer, $cacheType)) {
+                return $context->getCache()->get($cachePointer, $cacheType);
+            }
+
             $file = $context->resolveRelativeUri($jsonReference->getDocumentUri());
+
             try {
                 $referencedDocument = $context->fetchReferencedFile($file);
             } catch (\Throwable $e) {
@@ -240,7 +275,7 @@ class Reference implements SpecObjectInterface, DocumentContextInterface
                 if ($context->mode === ReferenceContext::RESOLVE_MODE_INLINE && strncmp($referencedObject->getReference(), '#', 1) === 0) {
                     $referencedObject->setContext($context);
                 } else {
-                    return $this->resolveTransitiveReference($referencedObject, $context);
+                    $referencedObject = $this->resolveTransitiveReference($referencedObject, $context);
                 }
             } else {
                 if ($referencedObject instanceof SpecObjectInterface) {
@@ -248,7 +283,10 @@ class Reference implements SpecObjectInterface, DocumentContextInterface
                 }
             }
 
+            $context->getCache()->set($cachePointer,$cacheType, $referencedObject);
+
             return $referencedObject;
+
         } catch (NonexistentJsonPointerReferenceException $e) {
             $message = "Failed to resolve Reference '$this->_ref' to $this->_to Object: " . $e->getMessage();
             if ($context->throwException) {
