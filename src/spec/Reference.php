@@ -74,7 +74,7 @@ class Reference implements SpecObjectInterface, DocumentContextInterface
         // Note: Symfony YAML parser bug: https://github.com/symfony/symfony/pull/51444
         if (!isset($data['$ref']) || $data['$ref'] === '') {
             throw new TypeErrorException(
-                "Reference Object requires field '\$ref' with a non-empty string. Data given: '" . print_r($data, true) . "'."
+                "Reference Object requires field '\$ref' with a non-empty value. Data given: '" . print_r($data, true) . "'."
             );
         }
 
