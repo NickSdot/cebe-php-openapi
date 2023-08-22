@@ -68,11 +68,16 @@ class Reference implements SpecObjectInterface, DocumentContextInterface
      */
     public function __construct(array $data, string $to = null)
     {
-        if (!isset($data['$ref'])) {
+        // From 'Reference Object' spec:
+        // REQUIRED. The reference identifier. This MUST be in the form of a URI.
+        // https://spec.openapis.org/oas/v3.1.0#fixed-fields-18
+        // Note: Symfony YAML parser bug: https://github.com/symfony/symfony/pull/51444
+        if (!isset($data['$ref']) || $data['$ref'] === '') {
             throw new TypeErrorException(
-                "Unable to instantiate Reference Object with data '" . print_r($data, true) . "'."
+                "Reference Object requires field '\$ref' with a non-empty string. Data given: '" . print_r($data, true) . "'."
             );
         }
+
         if ($to !== null && !is_subclass_of($to, SpecObjectInterface::class, true)) {
             throw new TypeErrorException(
                 "Unable to instantiate Reference Object, Referenced Class type must implement SpecObjectInterface."
