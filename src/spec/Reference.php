@@ -354,8 +354,9 @@ class Reference implements SpecObjectInterface, DocumentContextInterface
                 continue;
             }
 
-            // non strings can't be references
-            if (is_string($value) === false) {
+            // only values of type string can be references
+            // and only keys indicating a reference should be parsed
+            if (! is_string($value) || ! in_array($key, ['$ref', 'externalValue'], true)) {
                 continue;
             }
 
